@@ -78,6 +78,7 @@ export default function Home() {
   const [scanLog, setScanLog] = useState<string[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const runScanRef = useRef<(isManual?: boolean) => Promise<void>>();
 
   // Accumulated posts (deduped by id, sorted by intent score)
   const [allPosts, setAllPosts] = useState<ScoredPost[]>([]);
@@ -200,7 +201,11 @@ export default function Home() {
     }
   }, [subreddits, sort, maxAgeHours, maxComments, minUpvotes, minComments, minIntentScore, requireTechRole, seenIds, addLog, sendNotification]);
 
-  // Auto-scan interval
+  // Keep ref in sync with latest runScan (avoids stale closures in setInterval)
+  runScanRef.current = runScan;
+
+  // Auto-scan interval — only depends on enabled state and interval duration.
+  // Uses ref for runScan so it always calls the latest version without resetting timers.
   useEffect(() => {
     if (autoScanEnabled) {
       // Set countdown
@@ -211,9 +216,9 @@ export default function Home() {
         setSecondsUntilNext((prev) => Math.max(0, prev - 1));
       }, 1000);
 
-      // Scan interval
+      // Scan interval — calls ref so it always uses latest state
       intervalRef.current = setInterval(() => {
-        runScan(false);
+        runScanRef.current?.(false);
         setSecondsUntilNext(scanIntervalMins * 60);
       }, scanIntervalMins * 60 * 1000);
 
@@ -226,7 +231,7 @@ export default function Home() {
       if (countdownRef.current) clearInterval(countdownRef.current);
       setSecondsUntilNext(0);
     }
-  }, [autoScanEnabled, scanIntervalMins, runScan]);
+  }, [autoScanEnabled, scanIntervalMins]);
 
   const toggleAutoScan = () => {
     if (!autoScanEnabled) {
