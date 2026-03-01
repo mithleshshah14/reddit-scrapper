@@ -1,0 +1,226 @@
+// ── Pain / intent phrases ─────────────────────────────────────
+export const PAIN_PHRASES = [
+  "applied to",
+  "sent out",
+  "no interview",
+  "no interviews",
+  "no response",
+  "no responses",
+  "getting rejected",
+  "got rejected",
+  "keep getting rejected",
+  "ghosted",
+  "what am i doing wrong",
+  "not getting callbacks",
+  "not getting calls",
+  "still nothing",
+  "0 interviews",
+  "zero interviews",
+  "hundreds of applications",
+  "nothing back",
+  "no luck",
+  "no offers",
+  "can't find a job",
+  "can't get a job",
+  "struggling to find",
+  "job search is",
+  "losing hope",
+  "so frustrated",
+  "ready to give up",
+  "months of applying",
+  "not hearing back",
+  "nobody responds",
+  "nobody is hiring",
+  "what else can i do",
+];
+
+// ── Volume patterns (regex) ───────────────────────────────────
+// Matches frustration-level numbers: "200 applications", "100+", "sent 300", etc.
+// Keep patterns tight — only match clear job-search volume signals.
+export const VOLUME_PATTERNS = [
+  // "200 applications", "100 resumes", "50 jobs", "300 companies", "150 interviews"
+  /\d{2,}\s*\+?\s*(applications?|resumes?|jobs?|companies|positions?|interviews?|places|roles?|openings?)/i,
+  // "6 months applying", "3 months searching"
+  /\d{1,}\s*months?\s*(of\s*)?(applying|searching|looking|hunting|trying)/i,
+  // "100+", "200+", "300+" (standalone with plus sign — always intentional)
+  /\b\d{2,}\s*\+\b/,
+  // "applied to 150", "applied 200"
+  /applied\s*(to\s*)?\d{2,}/i,
+  // "sent out 80", "sent 300", "submitted 200"
+  /(sent|submitted|dropped|fired off)\s*(out\s*)?\d{2,}\b/i,
+  // "over/more than/almost N applications/jobs" (require the noun)
+  /(over|more than|almost|nearly|close to|at least)\s+\d{2,}\s+(applications?|resumes?|jobs?|companies|positions?|interviews?|roles?|openings?)/i,
+  // "weeks of applying", "years of searching"
+  /\d{1,}\s*(weeks?|years?)\s*(of\s*)?(applying|searching|looking|hunting|trying)/i,
+];
+
+// ── Tech role keywords ────────────────────────────────────────
+export const TECH_KEYWORDS = [
+  "developer",
+  "software",
+  "engineer",
+  "engineering",
+  "backend",
+  "frontend",
+  "front-end",
+  "back-end",
+  "full-stack",
+  "fullstack",
+  "qa",
+  "sdet",
+  "devops",
+  "data scientist",
+  "data engineer",
+  "machine learning",
+  "cloud",
+  "sysadmin",
+  "cybersecurity",
+  "product manager",
+  "ui/ux",
+  "ux designer",
+  "web developer",
+  "mobile developer",
+  "sre",
+  "platform engineer",
+];
+
+// ── Exclude phrases (sensitive content) ───────────────────────
+export const EXCLUDE_PHRASES = [
+  "suicidal",
+  "suicide",
+  "mental health crisis",
+  "end my life",
+  "end it all",
+  "kill myself",
+  "abuse",
+  "visa denial rant",
+  "should i quit life",
+  "drop out of college",
+  "self harm",
+  "self-harm",
+];
+
+// ── Scoring ───────────────────────────────────────────────────
+
+export interface ScoredPost {
+  id: string;
+  title: string;
+  body: string;
+  author: string;
+  subreddit: string;
+  score: number;
+  comments: number;
+  created: string;
+  redditUrl: string;
+  intentScore: number;
+  matchedSignals: string[];
+}
+
+export interface FilterConfig {
+  maxAgeHours: number;         // freshness: only posts within N hours (default 12)
+  maxComments: number;         // early-bird: skip crowded threads (default 15)
+  minUpvotes: number;          // engagement floor (default 3)
+  minComments: number;         // engagement floor (default 1)
+  minIntentScore: number;      // minimum score to include (default 3)
+  requireTechRole: boolean;    // only keep posts with tech keywords (default false)
+}
+
+export const DEFAULT_FILTER_CONFIG: FilterConfig = {
+  maxAgeHours: 12,
+  maxComments: 15,
+  minUpvotes: 3,
+  minComments: 1,
+  minIntentScore: 3,
+  requireTechRole: false,
+};
+
+export function scorePost(
+  title: string,
+  body: string
+): { intentScore: number; matchedSignals: string[] } {
+  const text = `${title} ${body}`.toLowerCase();
+  let intentScore = 0;
+  const matchedSignals: string[] = [];
+
+  // ── Pain phrases (+2 each, capped at +6) ───────────────────
+  let painHits = 0;
+  for (const phrase of PAIN_PHRASES) {
+    if (text.includes(phrase)) {
+      painHits++;
+      matchedSignals.push(`pain: "${phrase}"`);
+      if (painHits >= 3) break; // cap contribution
+    }
+  }
+  intentScore += painHits * 2;
+
+  // ── Volume patterns (+2 each, capped at +4) ────────────────
+  let volumeHits = 0;
+  for (const pattern of VOLUME_PATTERNS) {
+    const match = text.match(pattern);
+    if (match) {
+      volumeHits++;
+      matchedSignals.push(`volume: "${match[0].trim()}"`);
+      if (volumeHits >= 2) break;
+    }
+  }
+  intentScore += volumeHits * 2;
+
+  // ── Tech keywords (+1) ─────────────────────────────────────
+  for (const keyword of TECH_KEYWORDS) {
+    if (text.includes(keyword)) {
+      intentScore += 1;
+      matchedSignals.push(`role: "${keyword}"`);
+      break; // only count once
+    }
+  }
+
+  // ── Exclude phrases (-100, effectively filters out) ────────
+  for (const phrase of EXCLUDE_PHRASES) {
+    if (text.includes(phrase)) {
+      intentScore = -100;
+      matchedSignals.push(`excluded: "${phrase}"`);
+      break;
+    }
+  }
+
+  return { intentScore, matchedSignals };
+}
+
+export function filterAndScorePosts(
+  posts: Omit<ScoredPost, "intentScore" | "matchedSignals">[],
+  config: FilterConfig
+): ScoredPost[] {
+  const now = Date.now();
+  const maxAgeMs = config.maxAgeHours * 60 * 60 * 1000;
+
+  return posts
+    .map((post) => {
+      const { intentScore, matchedSignals } = scorePost(post.title, post.body);
+      return { ...post, intentScore, matchedSignals };
+    })
+    .filter((post) => {
+      // Freshness
+      const postAge = now - new Date(post.created).getTime();
+      if (postAge > maxAgeMs) return false;
+
+      // Early-bird (skip crowded threads)
+      if (post.comments > config.maxComments) return false;
+
+      // Engagement floor
+      if (post.score < config.minUpvotes) return false;
+      if (post.comments < config.minComments) return false;
+
+      // Tech role filter
+      if (config.requireTechRole) {
+        const text = `${post.title} ${post.body}`.toLowerCase();
+        const hasTechKeyword = TECH_KEYWORDS.some((kw) => text.includes(kw));
+        if (!hasTechKeyword) return false;
+      }
+
+      // Intent score threshold
+      if (post.intentScore < config.minIntentScore) return false;
+
+      return true;
+    })
+    .sort((a, b) => b.intentScore - a.intentScore); // highest intent first
+}
