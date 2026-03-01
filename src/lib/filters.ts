@@ -29,17 +29,28 @@ export const PAIN_PHRASES = [
   "ready to give up",
   "months of applying",
   "not hearing back",
+  "never called back",
+  "never heard back",
+  "never hear back",
   "nobody responds",
   "nobody is hiring",
+  "no one is hiring",
   "what else can i do",
+  "need a job",
+  "i need help",
+  "please help",
+  "someone help",
 ];
 
 // ── Volume patterns (regex) ───────────────────────────────────
 // Matches frustration-level numbers: "200 applications", "100+", "sent 300", etc.
 // Keep patterns tight — only match clear job-search volume signals.
+// Common nouns people use when talking about application volume
+const VOL_NOUNS = "applications?|apps|resumes?|jobs?|companies|positions?|interviews?|places|roles?|openings?|rejections?";
+
 export const VOLUME_PATTERNS = [
-  // "200 applications", "100 resumes", "50 jobs", "300 companies", "150 interviews"
-  /\d{2,}\s*\+?\s*(applications?|resumes?|jobs?|companies|positions?|interviews?|places|roles?|openings?)/i,
+  // "200 applications", "100 resumes", "50 jobs", "500 apps", "300 companies"
+  new RegExp(`\\d{2,}\\s*\\+?\\s*(${VOL_NOUNS})`, "i"),
   // "6 months applying", "3 months searching"
   /\d{1,}\s*months?\s*(of\s*)?(applying|searching|looking|hunting|trying)/i,
   // "100+", "200+", "300+" (standalone with plus sign — always intentional)
@@ -48,8 +59,8 @@ export const VOLUME_PATTERNS = [
   /applied\s*(to\s*)?\d{2,}/i,
   // "sent out 80", "sent 300", "submitted 200"
   /(sent|submitted|dropped|fired off)\s*(out\s*)?\d{2,}\b/i,
-  // "over/more than/almost N applications/jobs" (require the noun)
-  /(over|more than|almost|nearly|close to|at least)\s+\d{2,}\s+(applications?|resumes?|jobs?|companies|positions?|interviews?|roles?|openings?)/i,
+  // "over/more than/almost N applications/jobs/apps" (require the noun)
+  new RegExp(`(over|more than|almost|nearly|close to|at least)\\s+\\d{2,}\\s+(${VOL_NOUNS})`, "i"),
   // "weeks of applying", "years of searching"
   /\d{1,}\s*(weeks?|years?)\s*(of\s*)?(applying|searching|looking|hunting|trying)/i,
 ];
@@ -199,16 +210,22 @@ export function filterAndScorePosts(
       return { ...post, intentScore, matchedSignals };
     })
     .filter((post) => {
-      // Freshness
+      // Freshness (always enforced)
       const postAge = now - new Date(post.created).getTime();
       if (postAge > maxAgeMs) return false;
 
-      // Early-bird (skip crowded threads)
-      if (post.comments > config.maxComments) return false;
+      // High-intent posts (>=5) bypass engagement filters.
+      // A post saying "500 apps no callback" is gold even with 0 upvotes.
+      const highIntent = post.intentScore >= 5;
 
-      // Engagement floor
-      if (post.score < config.minUpvotes) return false;
-      if (post.comments < config.minComments) return false;
+      if (!highIntent) {
+        // Early-bird (skip crowded threads)
+        if (post.comments > config.maxComments) return false;
+
+        // Engagement floor
+        if (post.score < config.minUpvotes) return false;
+        if (post.comments < config.minComments) return false;
+      }
 
       // Tech role filter
       if (config.requireTechRole) {
