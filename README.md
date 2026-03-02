@@ -30,6 +30,13 @@ src/
         route.ts              # API route — fetches Reddit, applies scoring + filters
   lib/
     filters.ts                # Intent scoring engine — all signal lists, scoring logic, filters
+scripts/
+  scan.mjs                    # Standalone headless scanner (GitHub Actions)
+.github/
+  workflows/
+    reddit-scan.yml           # Cron workflow — hourly 11AM–1AM IST
+data/
+  seen.json                   # Dedup store — post IDs seen in last 48h
 ```
 
 ## API Reference
@@ -145,7 +152,7 @@ Regex patterns matching numerical frustration signals. 7 patterns covering:
 
 12 phrases for sensitive content that should not be treated as distribution leads: suicidal, suicide, mental health crisis, self harm, abuse, etc. These posts score -100 and are always filtered out.
 
-## Auto-Scan Feature
+## Auto-Scan Feature (Browser)
 
 Toggle auto-scan in the UI to run periodic scans without manual intervention.
 
@@ -163,17 +170,100 @@ Toggle auto-scan in the UI to run periodic scans without manual intervention.
 - `runScan` is stored in a ref (`runScanRef`) to prevent the interval from resetting when state changes
 - The effect only re-runs when `autoScanEnabled` or `scanIntervalMins` change — not on every render
 
-## Default Subreddits
+## GitHub Actions Automation (Headless)
+
+A standalone Node.js script (`scripts/scan.mjs`) runs on a cron schedule via GitHub Actions — no browser needed.
+
+### How It Works
+
+1. Fetches latest 100 posts from each of 16 subreddits via Reddit's public JSON API
+2. Scores and filters using the same intent engine as the browser app
+3. Deduplicates against `data/seen.json` (committed to repo, auto-pruned after 48h)
+4. Sends a Discord webhook notification with results (or a "no new posts" summary)
+
+### Schedule
+
+Runs **every hour from 11:00 AM to 1:00 AM IST** (15 runs/day):
+
+| IST | UTC (cron) |
+|-----|------------|
+| 11:00 AM (first) | 5:30 AM |
+| 12:00 PM | 6:30 AM |
+| ... | ... |
+| 12:00 AM | 6:30 PM |
+| 1:00 AM (last) | 7:30 PM |
+
+Cron expression: `30 5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 * * *`
+
+### Filter Config (Headless)
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| `maxAgeHours` | 2 | Only posts from last 2h (since we run hourly) |
+| `maxComments` | 15 | Skip crowded threads |
+| `minUpvotes` | 1 | Low bar — intent score matters more |
+| `minComments` | 0 | Don't miss zero-comment gems |
+| `minIntentScore` | 3 | Moderate+ intent only |
+
+### Discord Notifications
+
+- **Posts found:** Orange (intent 3-4) or red (intent 5+) embed with top 5 posts, each showing intent score, subreddit, title, and Reddit link
+- **No new posts:** Grey embed with scan stats (posts scanned, subreddits checked)
+- **Every run sends a notification** — so silence = broken, not "nothing found"
+
+### Setup
+
+1. Add `DISCORD_SCRAPER_WEBHOOK_URL` as a GitHub Actions secret (Settings → Secrets → Actions)
+2. Push to repo — cron starts automatically
+3. Manual trigger: Actions tab → Reddit Scanner → Run workflow
+
+### Deduplication (`data/seen.json`)
+
+- Stores `{ "ids": { "postId": timestamp, ... } }` in the repo
+- GitHub Actions commits the updated file after each run (`[skip ci]` to avoid loops)
+- Entries older than 48h are auto-pruned on every run
+- First run after clearing `seen.json` may re-notify on previously seen posts
+
+### Files
 
 ```
+scripts/
+  scan.mjs                    # Standalone scanner — no Next.js dependency
+.github/
+  workflows/
+    reddit-scan.yml           # Cron workflow (hourly 11AM–1AM IST)
+data/
+  seen.json                   # Dedup store (auto-committed by Actions)
+```
+
+### Running Locally
+
+```bash
+# Without Discord (just console output)
+node scripts/scan.mjs
+
+# With Discord notifications
+DISCORD_SCRAPER_WEBHOOK_URL=https://discord.com/api/webhooks/... node scripts/scan.mjs
+```
+
+## Default Subreddits
+
+### Browser App
+```
 jobs, cscareerquestions, resumes, jobsearchhacks, careerguidance
+```
+
+### Headless Scanner (GitHub Actions)
+```
+jobs, cscareerquestions, resumes, jobsearchhacks, careerguidance, careeradvice,
+recruitinghell, askrecruiters, jobsearch, unemployment, workreform, experienceddevs,
+ITCareerQuestions, webdev, startups, freelance
 ```
 
 ### Other Recommended Subreddits
 
 ```
-ResumeExperts, recruitinghell, layoffs, ITCareerQuestions, ExperiencedDevs,
-cscareerquestionsEU, jobsearch, WorkOnline, remotework, findapath
+ResumeExperts, layoffs, cscareerquestionsEU, WorkOnline, remotework, findapath
 ```
 
 ## Adding New Signals
@@ -241,5 +331,5 @@ In `scorePost()` function:
 
 - Reddit's public JSON API returns max 100 posts per subreddit per request
 - No auth/rate limiting on the API route (add if deploying publicly)
-- Post deduplication is in-memory (resets on page refresh)
-- Reddit may rate-limit requests if scanning many subreddits frequently (add delay between requests if hitting 429s)
+- Browser deduplication is in-memory (resets on page refresh); headless scanner uses persistent `data/seen.json`
+- Reddit may rate-limit requests — headless scanner adds 1.2s delay between subreddit fetches to avoid 429s
