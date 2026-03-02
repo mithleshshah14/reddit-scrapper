@@ -227,31 +227,42 @@ function sleep(ms) {
 
 // ─── Discord webhook ─────────────────────────────────────────────
 
-async function sendDiscordNotification(posts) {
+async function sendDiscordNotification(posts, stats) {
   if (!DISCORD_WEBHOOK) {
     console.log("  No DISCORD_SCRAPER_WEBHOOK_URL set — skipping notification.");
     return;
   }
 
-  const maxIntent = Math.max(...posts.map((p) => p.intentScore));
-  const color = maxIntent >= 5 ? 0xff4444 : 0xff8c00; // red for high, orange for moderate
+  let embed;
 
-  const top5 = posts.slice(0, 5);
-  const lines = top5.map(
-    (p, i) =>
-      `**${i + 1}.** [${p.intentScore}] r/${p.subreddit} — [${truncate(p.title, 80)}](${p.redditUrl})`
-  );
+  if (posts.length === 0) {
+    embed = {
+      title: "📭 No new high-intent posts this run",
+      description: `Scanned **${stats.raw}** posts across **${stats.subreddits}** subreddits.\n${stats.scored} matched filters, but all were previously seen.`,
+      color: 0x666666, // grey
+      footer: { text: new Date().toUTCString() },
+    };
+  } else {
+    const maxIntent = Math.max(...posts.map((p) => p.intentScore));
+    const color = maxIntent >= 5 ? 0xff4444 : 0xff8c00; // red for high, orange for moderate
 
-  if (posts.length > 5) {
-    lines.push(`\n*...and ${posts.length - 5} more*`);
+    const top5 = posts.slice(0, 5);
+    const lines = top5.map(
+      (p, i) =>
+        `**${i + 1}.** [${p.intentScore}] r/${p.subreddit} — [${truncate(p.title, 80)}](${p.redditUrl})`
+    );
+
+    if (posts.length > 5) {
+      lines.push(`\n*...and ${posts.length - 5} more*`);
+    }
+
+    embed = {
+      title: `🎯 ${posts.length} high-intent post${posts.length === 1 ? "" : "s"} found`,
+      description: lines.join("\n"),
+      color,
+      footer: { text: `Max intent: ${maxIntent} | Scanned ${stats.raw} posts | ${new Date().toUTCString()}` },
+    };
   }
-
-  const embed = {
-    title: `🎯 ${posts.length} high-intent post${posts.length === 1 ? "" : "s"} found`,
-    description: lines.join("\n"),
-    color,
-    footer: { text: `Max intent: ${maxIntent} | ${new Date().toUTCString()}` },
-  };
 
   const res = await fetch(DISCORD_WEBHOOK, {
     method: "POST",
@@ -304,17 +315,19 @@ async function main() {
   saveSeen(seen);
   console.log(`Seen database: ${Object.keys(seen.ids).length} IDs tracked`);
 
+  const stats = { raw: allPosts.length, scored: scored.length, subreddits: SUBREDDITS.length };
+
   if (newPosts.length > 0) {
     console.log("\nTop posts:");
     for (const p of newPosts.slice(0, 10)) {
       console.log(`  [${p.intentScore}] r/${p.subreddit} — ${truncate(p.title, 70)}`);
       console.log(`       Signals: ${p.matchedSignals.join(", ")}`);
     }
-
-    await sendDiscordNotification(newPosts);
   } else {
     console.log("\nNo new high-intent posts this run.");
   }
+
+  await sendDiscordNotification(newPosts, stats);
 
   console.log(`\nDone at ${new Date().toISOString()}`);
 }
