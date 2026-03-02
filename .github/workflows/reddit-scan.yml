@@ -1,0 +1,36 @@
+name: Reddit Scanner
+
+on:
+  schedule:
+    # Every hour from 11 AM to 1 AM IST (5:30 AM to 7:30 PM UTC)
+    # Runs at :30 past each hour to align with IST half-hour offset
+    - cron: '30 5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Reddit scanner
+        env:
+          DISCORD_SCRAPER_WEBHOOK_URL: ${{ secrets.DISCORD_SCRAPER_WEBHOOK_URL }}
+        run: node scripts/scan.mjs
+
+      - name: Commit updated seen.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/seen.json
+          git diff --staged --quiet || git commit -m "chore: update seen.json [skip ci]"
+          git push
