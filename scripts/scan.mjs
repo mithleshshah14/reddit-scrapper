@@ -36,6 +36,10 @@ const SUBREDDITS = [
   "webdev",
   "startups",
   "freelance",
+  "careeradvice101",
+  "developersIndia",
+  "jobhunting",
+  "resumeexperts",
 ];
 
 const FILTER_CONFIG = {
