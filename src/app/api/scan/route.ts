@@ -24,7 +24,7 @@ const FILTER_CONFIG = {
 };
 
 const FETCH_LIMIT = 100;
-const RATE_LIMIT_MS = 1000;
+const RATE_LIMIT_MS = 200; // PullPush allows 1000 req/hour
 const SEEN_TTL = 48 * 60 * 60; // 48h in seconds
 const LEAD_TTL = 60 * 60 * 24 * 7; // 7 days in seconds
 
@@ -199,61 +199,46 @@ function filterAndScore(posts: RawPost[]): ScoredPost[] {
     .sort((a, b) => b.intentScore - a.intentScore);
 }
 
-// ─── Reddit fetch ────────────────────────────────────────────────
+// ─── Reddit fetch via PullPush API (Reddit mirror, no IP blocks) ─
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchSubreddit(subreddit: string): Promise<RawPost[]> {
-  // Try multiple endpoints — Reddit blocks some IPs on certain domains
-  const endpoints = [
-    `https://old.reddit.com/r/${subreddit}/new.json?limit=${FETCH_LIMIT}`,
-    `https://api.reddit.com/r/${subreddit}/new?limit=${FETCH_LIMIT}`,
-    `https://www.reddit.com/r/${subreddit}/new.json?limit=${FETCH_LIMIT}`,
-  ];
+  const url = `https://api.pullpush.io/reddit/search/submission/?subreddit=${subreddit}&after=${FILTER_CONFIG.maxAgeHours}h&size=${FETCH_LIMIT}&sort=desc&sort_type=created_utc`;
 
-  for (const url of endpoints) {
-    try {
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json",
-        },
-        redirect: "follow",
-      });
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "HuntWiseScanner/1.0" },
+    });
 
-      if (!res.ok) {
-        console.log(`[${subreddit}] ${new URL(url).hostname} → ${res.status}`);
-        continue;
-      }
-
-      const data = await res.json();
-      const posts = data?.data?.children;
-      if (!Array.isArray(posts)) {
-        console.log(`[${subreddit}] ${new URL(url).hostname} → unexpected response shape`);
-        continue;
-      }
-
-      console.log(`[${subreddit}] ${new URL(url).hostname} → ${posts.length} posts`);
-      return posts
-        .filter((c: { kind: string }) => c.kind === "t3")
-        .map((c: { data: Record<string, unknown> }) => ({
-          id: c.data.id as string,
-          title: c.data.title as string,
-          body: (c.data.selftext as string) || "",
-          author: c.data.author as string,
-          subreddit: c.data.subreddit as string,
-          score: c.data.score as number,
-          comments: c.data.num_comments as number,
-          created: new Date((c.data.created_utc as number) * 1000).toISOString(),
-          redditUrl: `https://www.reddit.com${c.data.permalink}`,
-        }));
-    } catch (err) {
-      console.log(`[${subreddit}] ${new URL(url).hostname} → error: ${err}`);
-      continue;
+    if (!res.ok) {
+      console.log(`[${subreddit}] pullpush → ${res.status}`);
+      return [];
     }
-  }
 
-  return [];
+    const json = await res.json();
+    const posts = json?.data;
+    if (!Array.isArray(posts)) {
+      console.log(`[${subreddit}] pullpush → unexpected response`);
+      return [];
+    }
+
+    console.log(`[${subreddit}] pullpush → ${posts.length} posts`);
+    return posts.map((p: Record<string, unknown>) => ({
+      id: p.id as string,
+      title: p.title as string,
+      body: (p.selftext as string) || "",
+      author: p.author as string,
+      subreddit: p.subreddit as string,
+      score: (p.score as number) || 0,
+      comments: (p.num_comments as number) || 0,
+      created: new Date((p.created_utc as number) * 1000).toISOString(),
+      redditUrl: `https://www.reddit.com${p.permalink}`,
+    }));
+  } catch (err) {
+    console.log(`[${subreddit}] pullpush → error: ${err}`);
+    return [];
+  }
 }
 
 // ─── Discord ─────────────────────────────────────────────────────
