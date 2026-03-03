@@ -55,7 +55,19 @@ function playNotificationSound() {
 }
 
 export default function Home() {
-  const [subreddits, setSubreddits] = useState(DEFAULT_SUBREDDITS);
+  const [subreddits, setSubreddits] = useState<string[]>(DEFAULT_SUBREDDITS.split(","));
+  const [subredditInput, setSubredditInput] = useState("");
+  const [hydrated, setHydrated] = useState(false);
+
+  // Load subreddits from localStorage after hydration
+  useEffect(() => {
+    const stored = localStorage.getItem("reddit_scraper_subreddits");
+    if (stored) {
+      const parsed = stored.split(",").map((s) => s.trim()).filter(Boolean);
+      if (parsed.length > 0) setSubreddits(parsed);
+    }
+    setHydrated(true);
+  }, []);
   const [sort, setSort] = useState("new");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -65,9 +77,9 @@ export default function Home() {
   // Filter controls
   const [maxAgeHours, setMaxAgeHours] = useState(12);
   const [maxComments, setMaxComments] = useState(15);
-  const [minUpvotes, setMinUpvotes] = useState(3);
-  const [minComments, setMinComments] = useState(1);
-  const [minIntentScore, setMinIntentScore] = useState(3);
+  const [minUpvotes, setMinUpvotes] = useState(0);
+  const [minComments, setMinComments] = useState(0);
+  const [minIntentScore, setMinIntentScore] = useState(2);
   const [requireTechRole, setRequireTechRole] = useState(false);
 
   // Auto-scan state
@@ -76,9 +88,9 @@ export default function Home() {
   const [secondsUntilNext, setSecondsUntilNext] = useState(0);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>("default");
   const [scanLog, setScanLog] = useState<string[]>([]);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
-  const runScanRef = useRef<(isManual?: boolean) => Promise<void>>();
+  const nextScanAtRef = useRef<number>(0); // absolute timestamp for next scan
+  const runScanRef = useRef<((isManual?: boolean) => Promise<void>) | undefined>(undefined);
 
   // Accumulated posts (deduped by id, sorted by intent score)
   const [allPosts, setAllPosts] = useState<ScoredPost[]>([]);
@@ -86,6 +98,34 @@ export default function Home() {
   const [lastScanTime, setLastScanTime] = useState<string | null>(null);
   const [lastScanStats, setLastScanStats] = useState<{ raw: number; filtered: number } | null>(null);
   const [totalScans, setTotalScans] = useState(0);
+
+  // Persist subreddits to localStorage (only after hydration to avoid overwriting with defaults)
+  useEffect(() => {
+    if (hydrated) {
+      localStorage.setItem("reddit_scraper_subreddits", subreddits.join(","));
+    }
+  }, [subreddits, hydrated]);
+
+  const addSubreddit = (name: string) => {
+    const clean = name.trim().toLowerCase().replace(/^r\//, "");
+    if (!clean || subreddits.includes(clean)) return;
+    setSubreddits((prev) => [...prev, clean]);
+  };
+
+  const removeSubreddit = (name: string) => {
+    setSubreddits((prev) => prev.filter((s) => s !== name));
+  };
+
+  const handleSubredditKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addSubreddit(subredditInput);
+      setSubredditInput("");
+    }
+    if (e.key === "Backspace" && !subredditInput && subreddits.length > 0) {
+      setSubreddits((prev) => prev.slice(0, -1));
+    }
+  };
 
   // Request notification permission on mount
   useEffect(() => {
@@ -121,14 +161,14 @@ export default function Home() {
   }, []);
 
   const runScan = useCallback(async (isManual = false) => {
-    if (!subreddits.trim()) return;
+    if (subreddits.length === 0) return;
 
     setLoading(true);
     setError("");
 
     try {
       const params = new URLSearchParams({
-        subreddits: subreddits.trim(),
+        subreddits: subreddits.join(","),
         sort,
         maxAgeHours: maxAgeHours.toString(),
         maxComments: maxComments.toString(),
@@ -204,31 +244,35 @@ export default function Home() {
   // Keep ref in sync with latest runScan (avoids stale closures in setInterval)
   runScanRef.current = runScan;
 
-  // Auto-scan interval — only depends on enabled state and interval duration.
-  // Uses ref for runScan so it always calls the latest version without resetting timers.
+  // Auto-scan interval — uses absolute timestamp so countdown survives re-renders/hot reloads.
   useEffect(() => {
     if (autoScanEnabled) {
-      // Set countdown
-      setSecondsUntilNext(scanIntervalMins * 60);
+      const intervalMs = scanIntervalMins * 60 * 1000;
 
-      // Countdown timer (every second)
+      // Only set the target time if it's not already in the future
+      // (avoids resetting on effect re-runs from strict mode / hot reload)
+      if (nextScanAtRef.current <= Date.now()) {
+        nextScanAtRef.current = Date.now() + intervalMs;
+      }
+
+      // Countdown — derives remaining time from absolute target
       countdownRef.current = setInterval(() => {
-        setSecondsUntilNext((prev) => Math.max(0, prev - 1));
+        const remaining = Math.max(0, Math.round((nextScanAtRef.current - Date.now()) / 1000));
+        setSecondsUntilNext(remaining);
+
+        // Time to scan
+        if (remaining === 0) {
+          runScanRef.current?.(false);
+          nextScanAtRef.current = Date.now() + intervalMs;
+        }
       }, 1000);
 
-      // Scan interval — calls ref so it always uses latest state
-      intervalRef.current = setInterval(() => {
-        runScanRef.current?.(false);
-        setSecondsUntilNext(scanIntervalMins * 60);
-      }, scanIntervalMins * 60 * 1000);
-
       return () => {
-        if (intervalRef.current) clearInterval(intervalRef.current);
         if (countdownRef.current) clearInterval(countdownRef.current);
       };
     } else {
-      if (intervalRef.current) clearInterval(intervalRef.current);
       if (countdownRef.current) clearInterval(countdownRef.current);
+      nextScanAtRef.current = 0;
       setSecondsUntilNext(0);
     }
   }, [autoScanEnabled, scanIntervalMins]);
@@ -292,6 +336,7 @@ export default function Home() {
   const signalColor = (signal: string) => {
     if (signal.startsWith("pain:")) return "bg-red-900/40 text-red-300 border-red-800/50";
     if (signal.startsWith("volume:")) return "bg-orange-900/40 text-orange-300 border-orange-800/50";
+    if (signal.startsWith("help:")) return "bg-emerald-900/40 text-emerald-300 border-emerald-800/50";
     if (signal.startsWith("role:")) return "bg-blue-900/40 text-blue-300 border-blue-800/50";
     return "bg-zinc-800 text-zinc-400 border-zinc-700";
   };
@@ -315,12 +360,33 @@ export default function Home() {
               <label className="text-sm text-zinc-400 mb-1 block">Subreddits</label>
               <input
                 type="text"
-                value={subreddits}
-                onChange={(e) => setSubreddits(e.target.value)}
-                placeholder="jobs, cscareerquestions, resumes"
+                value={subredditInput}
+                onChange={(e) => setSubredditInput(e.target.value.replace(",", ""))}
+                onKeyDown={handleSubredditKeyDown}
+                placeholder="Type subreddit name + Enter"
                 disabled={autoScanEnabled}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-orange-500 transition-colors disabled:opacity-50"
               />
+              {subreddits.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {subreddits.map((sub) => (
+                    <span
+                      key={sub}
+                      className="flex items-center gap-1 bg-orange-600/20 text-orange-300 border border-orange-700/50 text-xs font-medium px-2.5 py-1 rounded-full"
+                    >
+                      r/{sub}
+                      {!autoScanEnabled && (
+                        <button
+                          onClick={() => removeSubreddit(sub)}
+                          className="text-orange-400 hover:text-orange-200 cursor-pointer ml-0.5"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Sort + Filters toggle */}

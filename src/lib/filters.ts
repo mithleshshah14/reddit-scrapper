@@ -40,6 +40,46 @@ export const PAIN_PHRASES = [
   "i need help",
   "please help",
   "someone help",
+  "any luck",
+  "having trouble",
+  "keep applying",
+  "been applying",
+  "been searching",
+  "been looking",
+  "been hunting",
+  "mass applying",
+  "spray and pray",
+  "applying everywhere",
+  "applying like crazy",
+  "not working",
+  "nothing works",
+  "what works",
+  "no calls",
+  "no callbacks",
+  "heard nothing",
+  "crickets",
+  "black hole",
+  "into a void",
+  "into the void",
+  "is it me",
+  "is it just me",
+  "am i doing something wrong",
+  "tough market",
+  "brutal market",
+  "this market",
+  "job market",
+  "impossible to find",
+  "impossible to get",
+  "so hard to find",
+  "so hard to get",
+  "exhausted",
+  "burned out",
+  "burnt out",
+  "depressing",
+  "demoralizing",
+  "disheartening",
+  "soul crushing",
+  "soul-crushing",
 ];
 
 // ── Volume patterns (regex) ───────────────────────────────────
@@ -95,6 +135,65 @@ export const TECH_KEYWORDS = [
   "platform engineer",
 ];
 
+// ── Help-seeking phrases (+1 each, capped at +2) ─────────────
+// These catch people actively asking for help — prime leads even
+// without frustration language.
+export const HELP_SEEKING_PHRASES = [
+  "review my resume",
+  "critique my resume",
+  "roast my resume",
+  "check my resume",
+  "look at my resume",
+  "feedback on my resume",
+  "help with my resume",
+  "fix my resume",
+  "improve my resume",
+  "rewrite my resume",
+  "redo my resume",
+  "resume review",
+  "resume critique",
+  "resume feedback",
+  "resume help",
+  "resume tips",
+  "resume advice",
+  "any tips",
+  "any advice",
+  "any suggestions",
+  "what should i do",
+  "what can i do",
+  "what do i do",
+  "how do i get",
+  "how do i land",
+  "how do i find",
+  "how to get more interviews",
+  "how to get interviews",
+  "how to get a job",
+  "how to land a job",
+  "how to find a job",
+  "how to stand out",
+  "how to improve",
+  "need advice",
+  "need help",
+  "need tips",
+  "need suggestions",
+  "is my resume good",
+  "is my resume bad",
+  "is my resume ok",
+  "what am i missing",
+  "where am i going wrong",
+  "what tools do you use",
+  "what tools should i",
+  "best tools for",
+  "looking for feedback",
+  "open to suggestions",
+  "honest feedback",
+  "honest opinion",
+  "be honest",
+  "be brutal",
+  "don't hold back",
+  "tear it apart",
+];
+
 // ── Exclude phrases (sensitive content) ───────────────────────
 export const EXCLUDE_PHRASES = [
   "suicidal",
@@ -139,9 +238,9 @@ export interface FilterConfig {
 export const DEFAULT_FILTER_CONFIG: FilterConfig = {
   maxAgeHours: 12,
   maxComments: 15,
-  minUpvotes: 3,
-  minComments: 1,
-  minIntentScore: 3,
+  minUpvotes: 0,
+  minComments: 0,
+  minIntentScore: 2,
   requireTechRole: false,
 };
 
@@ -175,6 +274,17 @@ export function scorePost(
     }
   }
   intentScore += volumeHits * 2;
+
+  // ── Help-seeking phrases (+1 each, capped at +2) ──────────
+  let helpHits = 0;
+  for (const phrase of HELP_SEEKING_PHRASES) {
+    if (text.includes(phrase)) {
+      helpHits++;
+      matchedSignals.push(`help: "${phrase}"`);
+      if (helpHits >= 2) break;
+    }
+  }
+  intentScore += helpHits;
 
   // ── Tech keywords (+1) ─────────────────────────────────────
   for (const keyword of TECH_KEYWORDS) {
@@ -214,14 +324,15 @@ export function filterAndScorePosts(
       const postAge = now - new Date(post.created).getTime();
       if (postAge > maxAgeMs) return false;
 
-      // High-intent posts (>=5) bypass engagement filters.
+      // Early-bird: always skip crowded threads — no point reaching out
+      // if 30 people already commented
+      if (post.comments > config.maxComments) return false;
+
+      // High-intent posts (>=5) bypass engagement floor filters.
       // A post saying "500 apps no callback" is gold even with 0 upvotes.
       const highIntent = post.intentScore >= 5;
 
       if (!highIntent) {
-        // Early-bird (skip crowded threads)
-        if (post.comments > config.maxComments) return false;
-
         // Engagement floor
         if (post.score < config.minUpvotes) return false;
         if (post.comments < config.minComments) return false;
