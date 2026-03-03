@@ -19,7 +19,7 @@ const FILTER_CONFIG = {
   maxComments: 15,
   minUpvotes: 0,
   minComments: 0,
-  minIntentScore: 2,
+  minIntentScore: 4,
   requireTechRole: false,
 };
 
