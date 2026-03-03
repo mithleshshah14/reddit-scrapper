@@ -106,6 +106,28 @@ export default function Home() {
     }
   }, [subreddits, hydrated]);
 
+  // Load persisted leads from Redis on mount
+  useEffect(() => {
+    fetch("/api/leads")
+      .then((res) => res.ok ? res.json() : [])
+      .then((leads: ScoredPost[]) => {
+        if (!Array.isArray(leads) || leads.length === 0) return;
+        setAllPosts((prev) => {
+          const existingIds = new Set(prev.map((p) => p.id));
+          const newLeads = leads.filter((l) => !existingIds.has(l.id));
+          if (newLeads.length === 0) return prev;
+          const merged = [...prev, ...newLeads];
+          return merged.sort((a, b) => b.intentScore - a.intentScore);
+        });
+        setSeenIds((prev) => {
+          const next = new Set(prev);
+          for (const l of leads) next.add(l.id);
+          return next;
+        });
+      })
+      .catch(() => { /* Redis not configured — ignore */ });
+  }, []);
+
   const addSubreddit = (name: string) => {
     const clean = name.trim().toLowerCase().replace(/^r\//, "");
     if (!clean || subreddits.includes(clean)) return;

@@ -25,6 +25,8 @@ jobs:
       - name: Run Reddit scanner
         env:
           DISCORD_SCRAPER_WEBHOOK_URL: ${{ secrets.DISCORD_SCRAPER_WEBHOOK_URL }}
+          VERCEL_APP_URL: ${{ secrets.VERCEL_APP_URL }}
+          LEADS_API_TOKEN: ${{ secrets.LEADS_API_TOKEN }}
         run: node scripts/scan.mjs
 
       - name: Commit updated seen.json

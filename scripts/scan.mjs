@@ -335,6 +335,43 @@ function truncate(str, max) {
   return str.length > max ? str.slice(0, max - 1) + "\u2026" : str;
 }
 
+// ─── Persist leads to Vercel (Upstash Redis) ─────────────────────
+
+const VERCEL_APP_URL = process.env.VERCEL_APP_URL;
+const LEADS_API_TOKEN = process.env.LEADS_API_TOKEN;
+
+async function postLeadsToVercel(posts) {
+  if (!VERCEL_APP_URL || !LEADS_API_TOKEN) {
+    console.log("  No VERCEL_APP_URL / LEADS_API_TOKEN — skipping lead persistence.");
+    return;
+  }
+
+  const now = Date.now();
+  const leads = posts.map((p) => ({ ...p, foundAt: now }));
+
+  try {
+    const res = await fetch(`${VERCEL_APP_URL}/api/leads`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${LEADS_API_TOKEN}`,
+      },
+      body: JSON.stringify(leads),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`  Lead persistence failed: ${res.status} — ${text}`);
+      return;
+    }
+
+    const json = await res.json();
+    console.log(`  Persisted ${json.stored} leads to Vercel.`);
+  } catch (err) {
+    console.error(`  Lead persistence error: ${err.message}`);
+  }
+}
+
 // ─── Main ────────────────────────────────────────────────────────
 
 async function main() {
@@ -382,6 +419,7 @@ async function main() {
   }
 
   await sendDiscordNotification(newPosts, stats);
+  await postLeadsToVercel(newPosts);
 
   console.log(`\nDone at ${new Date().toISOString()}`);
 }
