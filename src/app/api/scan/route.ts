@@ -204,34 +204,56 @@ function filterAndScore(posts: RawPost[]): ScoredPost[] {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchSubreddit(subreddit: string): Promise<RawPost[]> {
-  const url = `https://www.reddit.com/r/${subreddit}/new.json?limit=${FETCH_LIMIT}`;
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json",
-      },
-    });
+  // Try multiple endpoints — Reddit blocks some IPs on certain domains
+  const endpoints = [
+    `https://old.reddit.com/r/${subreddit}/new.json?limit=${FETCH_LIMIT}`,
+    `https://api.reddit.com/r/${subreddit}/new?limit=${FETCH_LIMIT}`,
+    `https://www.reddit.com/r/${subreddit}/new.json?limit=${FETCH_LIMIT}`,
+  ];
 
-    if (!res.ok) return [];
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json",
+        },
+        redirect: "follow",
+      });
 
-    const data = await res.json();
-    return data.data.children
-      .filter((c: { kind: string }) => c.kind === "t3")
-      .map((c: { data: Record<string, unknown> }) => ({
-        id: c.data.id as string,
-        title: c.data.title as string,
-        body: (c.data.selftext as string) || "",
-        author: c.data.author as string,
-        subreddit: c.data.subreddit as string,
-        score: c.data.score as number,
-        comments: c.data.num_comments as number,
-        created: new Date((c.data.created_utc as number) * 1000).toISOString(),
-        redditUrl: `https://www.reddit.com${c.data.permalink}`,
-      }));
-  } catch {
-    return [];
+      if (!res.ok) {
+        console.log(`[${subreddit}] ${new URL(url).hostname} → ${res.status}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const posts = data?.data?.children;
+      if (!Array.isArray(posts)) {
+        console.log(`[${subreddit}] ${new URL(url).hostname} → unexpected response shape`);
+        continue;
+      }
+
+      console.log(`[${subreddit}] ${new URL(url).hostname} → ${posts.length} posts`);
+      return posts
+        .filter((c: { kind: string }) => c.kind === "t3")
+        .map((c: { data: Record<string, unknown> }) => ({
+          id: c.data.id as string,
+          title: c.data.title as string,
+          body: (c.data.selftext as string) || "",
+          author: c.data.author as string,
+          subreddit: c.data.subreddit as string,
+          score: c.data.score as number,
+          comments: c.data.num_comments as number,
+          created: new Date((c.data.created_utc as number) * 1000).toISOString(),
+          redditUrl: `https://www.reddit.com${c.data.permalink}`,
+        }));
+    } catch (err) {
+      console.log(`[${subreddit}] ${new URL(url).hostname} → error: ${err}`);
+      continue;
+    }
   }
+
+  return [];
 }
 
 // ─── Discord ─────────────────────────────────────────────────────
@@ -288,12 +310,14 @@ export async function POST(req: NextRequest) {
   if (!redis) return NextResponse.json({ error: "Redis not configured" }, { status: 503 });
 
   // Fetch all subreddits
+  console.log(`Scan started: ${SUBREDDITS.length} subreddits`);
   const allPosts: RawPost[] = [];
   for (const sub of SUBREDDITS) {
     const posts = await fetchSubreddit(sub);
     allPosts.push(...posts);
     await sleep(RATE_LIMIT_MS);
   }
+  console.log(`Fetch complete: ${allPosts.length} raw posts`);
 
   // Score & filter
   const scored = filterAndScore(allPosts);
