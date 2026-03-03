@@ -119,7 +119,7 @@ export async function GET() {
       created: data.created,
       redditUrl: data.redditUrl,
       intentScore: Number(data.intentScore),
-      matchedSignals: JSON.parse(data.matchedSignals as string),
+      matchedSignals: typeof data.matchedSignals === "string" ? JSON.parse(data.matchedSignals) : data.matchedSignals as string[],
       foundAt: Number(data.foundAt),
     });
   }
