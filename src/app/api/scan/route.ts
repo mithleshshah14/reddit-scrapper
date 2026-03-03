@@ -199,13 +199,13 @@ function filterAndScore(posts: RawPost[]): ScoredPost[] {
     .sort((a, b) => b.intentScore - a.intentScore);
 }
 
-// ─── Reddit fetch via PullPush API (Reddit mirror, no IP blocks) ─
+// ─── Reddit fetch via Arctic Shift API (real-time Reddit mirror) ──
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchSubreddit(subreddit: string): Promise<RawPost[]> {
   const afterEpoch = Math.floor(Date.now() / 1000) - FILTER_CONFIG.maxAgeHours * 3600;
-  const url = `https://api.pullpush.io/reddit/search/submission/?subreddit=${subreddit}&after=${afterEpoch}&size=${FETCH_LIMIT}&sort=desc&sort_type=created_utc`;
+  const url = `https://arctic-shift.photon-reddit.com/api/posts/search?subreddit=${subreddit}&after=${afterEpoch}&limit=${FETCH_LIMIT}&sort=desc`;
 
   try {
     const res = await fetch(url, {
@@ -213,18 +213,18 @@ async function fetchSubreddit(subreddit: string): Promise<RawPost[]> {
     });
 
     if (!res.ok) {
-      console.log(`[${subreddit}] pullpush → ${res.status}`);
+      console.log(`[${subreddit}] arctic-shift → ${res.status}`);
       return [];
     }
 
     const json = await res.json();
     const posts = json?.data;
     if (!Array.isArray(posts)) {
-      console.log(`[${subreddit}] pullpush → unexpected response`);
+      console.log(`[${subreddit}] arctic-shift → unexpected response`);
       return [];
     }
 
-    console.log(`[${subreddit}] pullpush → ${posts.length} posts`);
+    console.log(`[${subreddit}] arctic-shift → ${posts.length} posts`);
     return posts.map((p: Record<string, unknown>) => ({
       id: p.id as string,
       title: p.title as string,
@@ -237,7 +237,7 @@ async function fetchSubreddit(subreddit: string): Promise<RawPost[]> {
       redditUrl: `https://www.reddit.com${p.permalink}`,
     }));
   } catch (err) {
-    console.log(`[${subreddit}] pullpush → error: ${err}`);
+    console.log(`[${subreddit}] arctic-shift → error: ${err}`);
     return [];
   }
 }
