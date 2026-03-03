@@ -138,3 +138,26 @@ export async function GET() {
 
   return NextResponse.json(leads);
 }
+
+// ── DELETE — flush all leads (auth required) ───────────────────
+export async function DELETE(req: NextRequest) {
+  const token = process.env.LEADS_API_TOKEN;
+  if (!token) return NextResponse.json({ error: "Not configured" }, { status: 500 });
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${token}`) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const redis = getRedis();
+  if (!redis) return NextResponse.json({ error: "Redis not configured" }, { status: 503 });
+
+  // Get all lead IDs
+  const ids: string[] = await redis.zrange(LEADS_KEY, 0, -1);
+  if (ids.length > 0) {
+    const pipeline = redis.pipeline();
+    for (const id of ids) pipeline.del(`lead:${id}`);
+    pipeline.del(LEADS_KEY);
+    pipeline.del("seen_ids");
+    await pipeline.exec();
+  }
+
+  return NextResponse.json({ flushed: ids.length });
+}

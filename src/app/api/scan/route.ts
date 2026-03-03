@@ -99,6 +99,18 @@ const EXCLUDE_PHRASES = [
   "drop out of college", "self harm", "self-harm",
 ];
 
+const PROMO_PHRASES = [
+  "i built", "i made", "i created", "we built", "we made", "we created",
+  "i launched", "we launched", "just launched", "just released",
+  "check out my", "check out our", "try my", "try our",
+  "my tool", "our tool", "my app", "our app", "my project", "our project",
+  "no signup needed", "no sign up", "no signup required",
+  "open source tool", "free tool i", "free tool we",
+  "built a free", "made a free", "created a free",
+  "launching", "beta testers", "looking for feedback on my",
+  "i'm the founder", "i'm the creator", "side project",
+];
+
 interface RawPost {
   id: string;
   title: string;
@@ -164,6 +176,14 @@ function scorePost(title: string, body: string) {
     if (text.includes(phrase)) {
       intentScore = -100;
       matchedSignals.push(`excluded: "${phrase}"`);
+      break;
+    }
+  }
+
+  for (const phrase of PROMO_PHRASES) {
+    if (text.includes(phrase)) {
+      intentScore = -100;
+      matchedSignals.push(`promo: "${phrase}"`);
       break;
     }
   }
