@@ -249,30 +249,47 @@ function pruneSeen(seen) {
 // ─── Reddit fetch ────────────────────────────────────────────────
 
 async function fetchSubreddit(subreddit) {
-  const url = `https://www.reddit.com/r/${subreddit}/new.json?limit=${FETCH_LIMIT}`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; HuntWiseBot/1.0; +https://huntwiseai.com)" },
-  });
+  // Try old.reddit.com first (less aggressive blocking), fall back to www
+  const endpoints = [
+    `https://old.reddit.com/r/${subreddit}/new.json?limit=${FETCH_LIMIT}`,
+    `https://www.reddit.com/r/${subreddit}/new.json?limit=${FETCH_LIMIT}`,
+  ];
 
-  if (!res.ok) {
-    console.error(`  [${subreddit}] HTTP ${res.status} ${res.statusText}`);
-    return [];
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "Accept": "application/json",
+        },
+      });
+
+      if (!res.ok) {
+        console.error(`  [${subreddit}] ${url.split('/r/')[0]} HTTP ${res.status}`);
+        continue;
+      }
+
+      const data = await res.json();
+      return data.data.children
+        .filter((c) => c.kind === "t3")
+        .map((c) => ({
+          id: c.data.id,
+          title: c.data.title,
+          body: c.data.selftext || "",
+          author: c.data.author,
+          subreddit: c.data.subreddit,
+          score: c.data.score,
+          comments: c.data.num_comments,
+          created: new Date(c.data.created_utc * 1000).toISOString(),
+          redditUrl: `https://www.reddit.com${c.data.permalink}`,
+        }));
+    } catch (err) {
+      console.error(`  [${subreddit}] fetch error: ${err.message}`);
+      continue;
+    }
   }
 
-  const data = await res.json();
-  return data.data.children
-    .filter((c) => c.kind === "t3")
-    .map((c) => ({
-      id: c.data.id,
-      title: c.data.title,
-      body: c.data.selftext || "",
-      author: c.data.author,
-      subreddit: c.data.subreddit,
-      score: c.data.score,
-      comments: c.data.num_comments,
-      created: new Date(c.data.created_utc * 1000).toISOString(),
-      redditUrl: `https://www.reddit.com${c.data.permalink}`,
-    }));
+  return [];
 }
 
 function sleep(ms) {
