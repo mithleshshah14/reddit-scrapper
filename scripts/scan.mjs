@@ -251,7 +251,7 @@ function pruneSeen(seen) {
 async function fetchSubreddit(subreddit) {
   const url = `https://www.reddit.com/r/${subreddit}/new.json?limit=${FETCH_LIMIT}`;
   const res = await fetch(url, {
-    headers: { "User-Agent": "HuntWiseRedditScanner/1.0" },
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; HuntWiseBot/1.0; +https://huntwiseai.com)" },
   });
 
   if (!res.ok) {
