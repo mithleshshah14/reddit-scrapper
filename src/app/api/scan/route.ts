@@ -204,7 +204,8 @@ function filterAndScore(posts: RawPost[]): ScoredPost[] {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchSubreddit(subreddit: string): Promise<RawPost[]> {
-  const url = `https://api.pullpush.io/reddit/search/submission/?subreddit=${subreddit}&after=${FILTER_CONFIG.maxAgeHours}h&size=${FETCH_LIMIT}&sort=desc&sort_type=created_utc`;
+  const afterEpoch = Math.floor(Date.now() / 1000) - FILTER_CONFIG.maxAgeHours * 3600;
+  const url = `https://api.pullpush.io/reddit/search/submission/?subreddit=${subreddit}&after=${afterEpoch}&size=${FETCH_LIMIT}&sort=desc&sort_type=created_utc`;
 
   try {
     const res = await fetch(url, {
