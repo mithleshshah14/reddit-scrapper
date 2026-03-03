@@ -18,7 +18,7 @@ jobs:
           LEADS_API_TOKEN: ${{ secrets.LEADS_API_TOKEN }}
         run: |
           echo "Triggering scan at $VERCEL_APP_URL/api/scan"
-          response=$(curl -s -w "\n%{http_code}" -X POST \
+          response=$(curl -s -L -w "\n%{http_code}" -X POST \
             "$VERCEL_APP_URL/api/scan" \
             -H "Authorization: Bearer $LEADS_API_TOKEN" \
             -H "Content-Type: application/json")
