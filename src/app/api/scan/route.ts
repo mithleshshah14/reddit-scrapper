@@ -224,8 +224,18 @@ async function fetchSubreddit(subreddit: string): Promise<RawPost[]> {
       return [];
     }
 
-    console.log(`[${subreddit}] arctic-shift → ${posts.length} posts`);
-    return posts.map((p: Record<string, unknown>) => ({
+    // Filter out removed/deleted posts
+    const livePosts = posts.filter((p: Record<string, unknown>) => {
+      const body = (p.selftext as string) || "";
+      const author = (p.author as string) || "";
+      if (author === "[deleted]") return false;
+      if (body === "[removed]" || body === "[deleted]") return false;
+      if (p.removed_by_category) return false;
+      return true;
+    });
+
+    console.log(`[${subreddit}] arctic-shift → ${livePosts.length}/${posts.length} posts (after filtering removed)`);
+    return livePosts.map((p: Record<string, unknown>) => ({
       id: p.id as string,
       title: p.title as string,
       body: (p.selftext as string) || "",
